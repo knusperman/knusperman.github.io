@@ -1,0 +1,102 @@
+---
+title: "Machine Learning Assignment"
+author: "Markus Heuchert"
+date: "11. Dezember 2014"
+output: html_document
+---
+
+
+This analysis is about the weight lifting data available from http://groupware.les.inf.puc-rio.br/har . This dataset is licensed under the Creative Commons license (CC BY-SA). The goal of this analysis is to apply a machine learning algorithm to predict the training class variable. 
+
+## About the data
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+From: http://groupware.les.inf.puc-rio.br/har#ixzz3LcrxpE3r
+
+Participants had multiple sensors attached to their body. The data set holds 160 columns. 
+
+
+## Getting and Cleaning the data
+
+The CSV-files were supplied by coursera. There is a training and a test set. The algorithm is created on the training data and then applied on the test set.
+
+Some cleaning was necessary in order to start the analysis.
+I assume that the CSVs are in the working directory. The caret and the randomForest package are required later on. 
+
+###Getting
+
+```{r}
+training<- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+set.seed(333)
+library("caret")
+library("randomForest")
+```
+
+### Preprocessing
+
+The first seven columns are excluded from the data set for this moment. These hold values that are not needed.
+These columns hold numeric values, but some of them are not formatted in the right way. We change that:
+```{r, print=FALSE}
+options(warn=-1)
+training7_159 <- apply(X = training[,7:159],MARGIN = 2, as.numeric)
+testing7_159 <- apply(X = testing[,7:159],MARGIN = 2, as.numeric)
+options(warn=0)
+```
+
+Next we want to exclude the columns that are completely NA in the test OR training set. This is important because we are not able to use predictors that are not included in one of the sets. Next, the predicted variable is attached to the data. 
+
+```{r}
+training7_159_notna <- training7_159[,-c(which(colSums(apply(training7_159,MARGIN=2,FUN=is.na))==dim(training7_159)[1]),which(colSums(apply(testing7_159,MARGIN=2,FUN=is.na))==dim(testing7_159)[1]))]
+training7_159_notna<-cbind(data.frame(training7_159_notna), "classe" = training$classe)
+```
+
+
+## Algorithm & Resampling
+
+Lets think a minute about the prediction we want to do. The predicted variable has five classes (A-D) hence we are talking about a classification problem.
+
+Trees seem to be the appropriate solution. In order to avoid the high variance that decision trees suffer from, we use an advanced algorithm called Random Forest.
+
+This algorithm uses bagging (bootstrap-aggregation) for resampling. This concept creates several "bags" of the data via bootstrap and applies the algorithm to these bags. Then these are aggregated again. It is a general-purpose procedure for reducing the variance of a statistical learning method.
+
+It turns out that there is a very easy way to estimate the test error of a bagged model, without the need to perform cross-validation or the validation set approach. Recall that the key to bagging is that trees are repeatedly fit to bootstrapped subsets of the observations. One can show that on average one-third of the observations are not used to fit a given bagged tree are referred to as the out-of-bag (OOB) observations. 
+
+We can predict the response for the *i* th observation using each of the trees in which that observation was OOB. In order to obtain a single prediction for the *i*th observation, we can take a majority vote. This leads to a single OOB prediction for the *i*th observation. An OOB prediction can be obtained in this way for each of the n observations, from which the classification error can be computed. The resulting OOB error is a valid estimate of the test error for the bagged model, since the response for each observation is predicted using only the trees that were not fit using that observation. Lucky for us, thee OOB error rate is automatically computed and displayed in the output. 
+
+As explained a Random Forest is a type of bagged tree. It advances the concept of a classification in the way that it decollerates the bagged trees because **each time a split in a tree is considered, a random sample of predictors is chosen as split candidates from the full set of predictors**. A fresh sample of predictors is taken at each split. This leads to different trees, because in normal decision trees *strong predictors* are always close to the root of the tree (because they have high entropy or information gain), so all of them look kind of the same (are correlated). In a Random Forest, there is only a random subset of predictors available at each split, so the algorithm is not even allowed to use all available predictors at a split.  
+
+As with bagging, Random Forests will not overfit if we increase the number of trees, so in practice we use a number of trees sufficiently large for the error rate to have settled down.
+
+Lets do it!
+
+```{r}
+randomForest(classe~. , data=training7_159_notna)->rf
+print(rf)
+```
+
+7 variables were used in each split and the algorithm created 500 trees.
+
+We see that the OOB estimate of error rate is around 0.14%. That is good! Also the classification errors are all below 1%. You can also look at the matrix to see how the predictions were based on the true values in the training set.
+Lets do a plot to understand how the error rate of the classes and OOB changes over the number of trees. 
+We see that 500 trees are too much, at around 50 there is no significant change in the error rates.
+```{r,echo=FALSE}
+library("ggplot2")
+rbind(data.frame("index"=1:500,"error"=rf$err.rate[,1],"type"=colnames(rf$err.rate)[1]),data.frame("index"=1:500,"error"=rf$err.rate[,2],"type"=colnames(rf$err.rate)[2]),data.frame("index"=1:500,"error"=rf$err.rate[,3],"type"=colnames(rf$err.rate)[3]),data.frame("index"=1:500,"error"=rf$err.rate[,4],"type"=colnames(rf$err.rate)[4]),data.frame("index"=1:500,"error"=rf$err.rate[,5],"type"=colnames(rf$err.rate)[5]),data.frame("index"=1:500,"error"=rf$err.rate[,6],"type"=colnames(rf$err.rate)[6]))->data
+ggplot(data=data[data$i<200,], aes(x=index, y=error, color=type))+geom_line()+xlab("Number of trees")+ylab("Error")
+```
+
+### Apply to the test data
+
+Lets do the predictions for the test set 
+```{r}
+predict(rf, testing7_159)->pr
+print(pr)
+
+```
+These are all correct in the programming assignment.
+
+Thank you for reading and greetings from Germany!
+
+
